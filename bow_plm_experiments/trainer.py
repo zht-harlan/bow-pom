@@ -45,14 +45,14 @@ def evaluate(
     data: Data,
     features: torch.Tensor,
     split_idx: Dict[str, torch.Tensor],
-    device: torch.device,
 ) -> Dict[str, Dict[str, float]]:
     model.eval()
-    logits = model(features.to(device), data.edge_index.to(device)).cpu()
+    logits = model(features, data.edge_index).cpu()
     labels = data.y.view(-1).cpu()
     results = {}
     for split_name, indices in split_idx.items():
-        results[split_name] = _metrics(logits[indices], labels[indices])
+        cpu_indices = indices.cpu()
+        results[split_name] = _metrics(logits[cpu_indices], labels[cpu_indices])
     return results
 
 
@@ -91,13 +91,7 @@ def fit(
         loss.backward()
         optimizer.step()
 
-        scores = evaluate(
-            model,
-            data.cpu(),
-            features.detach().cpu(),
-            {key: value.cpu() for key, value in split_idx.items()},
-            device,
-        )
+        scores = evaluate(model, data, features, split_idx)
         valid_acc = scores["valid"]["acc"]
         valid_f1 = scores["valid"]["f1_macro"]
 
@@ -118,10 +112,4 @@ def fit(
         raise RuntimeError("Training did not produce a valid checkpoint.")
 
     model.load_state_dict(best_state)
-    return evaluate(
-        model,
-        data.cpu(),
-        features.detach().cpu(),
-        {key: value.cpu() for key, value in split_idx.items()},
-        device=device,
-    )
+    return evaluate(model, data, features, split_idx)
