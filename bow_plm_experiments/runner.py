@@ -135,11 +135,23 @@ def run_experiments(
         seed=seed,
     )
     rows: List[Dict[str, object]] = []
+    total_jobs = len(datasets) * len(feature_types) * len(model_names) * runs
+    current_job = 0
+
+    print(
+        f"[Start] total_jobs={total_jobs} "
+        f"datasets={datasets} feature_types={feature_types} models={model_names} runs={runs}"
+    )
 
     for dataset_name in datasets:
+        print(f"[Dataset] loading dataset={dataset_name}")
         for feature_type in feature_types:
             for run_idx in range(runs):
                 run_seed = seed + run_idx
+                print(
+                    f"[Feature] dataset={dataset_name} feature_type={feature_type} "
+                    f"run={run_idx + 1}/{runs} seed={run_seed}"
+                )
                 bundle = load_dataset(dataset_name, root=root, seed=run_seed)
                 features = get_features(
                     bundle=bundle,
@@ -151,6 +163,12 @@ def run_experiments(
                 )
 
                 for model_name in model_names:
+                    current_job += 1
+                    print(
+                        f"[Run] {current_job}/{total_jobs} "
+                        f"dataset={bundle.name} feature_type={feature_type} "
+                        f"model={model_name} run={run_idx + 1}/{runs}"
+                    )
                     model = build_model(
                         model_name=model_name,
                         in_channels=features.size(-1),
@@ -177,13 +195,20 @@ def run_experiments(
                         "f1_macro": round(test_scores["f1_macro"], 4),
                     }
                     rows.append(row)
-                    print(row)
+                    print(
+                        f"[Done] dataset={bundle.name} feature_type={feature_type} "
+                        f"model={model_name} run={run_idx + 1}/{runs} "
+                        f"acc={row['acc']:.4f} f1_macro={row['f1_macro']:.4f}"
+                    )
 
     summary_rows = _aggregate_rows(rows)
 
     _write_raw_results(output_dir / "results_raw.csv", rows)
     _write_summary_results(output_dir / "results_long.csv", summary_rows)
     _write_wide_results(output_dir / "results_wide.csv", summary_rows)
+    print(f"[Finish] raw_results={output_dir / 'results_raw.csv'}")
+    print(f"[Finish] long_results={output_dir / 'results_long.csv'}")
+    print(f"[Finish] wide_results={output_dir / 'results_wide.csv'}")
 
     with (output_dir / "run_config.txt").open("w", encoding="utf-8") as handle:
         for key, value in asdict(config).items():
@@ -193,3 +218,4 @@ def run_experiments(
         handle.write(f"datasets={','.join(datasets)}\n")
         handle.write(f"feature_types={','.join(feature_types)}\n")
         handle.write(f"models={','.join(model_names)}\n")
+    print(f"[Finish] config={output_dir / 'run_config.txt'}")
