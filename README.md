@@ -1,51 +1,38 @@
 # BoW / PLM Graph Experiments
 
-这个项目用于复现实验表格中的节点分类结果，统一支持：
+用于完成论文实验中的节点分类对比，统一支持：
 
 - 数据集：`ogbn-arxiv`、`cora`、`pubmed`、`amazon-photo`
 - 特征：`bow`、`plm`
 - 模型：`mlp`、`gcn`、`sage`、`gat`
 - 指标：`Accuracy`、`Macro-F1`
-- 重复实验：支持多次运行并自动汇总均值与标准差
+- 重复实验：支持多次运行并统计均值与标准差
 
 ## 1. 安装依赖
 
+建议先按服务器 CUDA 环境安装 `torch` 和 `torch_geometric`，再安装其余依赖。
+
+## 2. 运行主实验
+
+完整跑 BoW：
+
 ```bash
-pip install -r requirements.txt
+python main.py --datasets ogbn-arxiv cora pubmed amazon-photo --feature-types bow --models mlp gcn sage gat --runs 5 --seed 42
 ```
 
-`torch-geometric` 在 Windows 环境下通常需要和本地 `torch` 版本匹配安装。如果直接安装失败，先按你的 CUDA / CPU 环境安装 `torch`，再安装 `torch-geometric`。
-
-## 2. 运行实验
+完整跑 PLM：
 
 ```bash
-python main.py
-```
-
-默认会尝试跑完整表格。
-
-可选参数示例：
-
-```bash
-python main.py --datasets cora pubmed --feature-types bow --models gcn gat
-```
-
-多次重复实验示例：
-
-```bash
-python main.py --runs 5 --seed 42
+python main.py --datasets ogbn-arxiv cora pubmed amazon-photo --feature-types plm --models mlp gcn sage gat --runs 5 --seed 42
 ```
 
 ## 3. BoW 特征
 
-`bow` 默认直接使用数据集自带的节点特征矩阵 `data.x`：
-
-- `cora` / `pubmed` / `amazon-photo`：通常就是词袋或稀疏文本特征
-- `ogbn-arxiv`：默认使用 OGB 自带特征
+`bow` 默认直接使用数据集自带的 `data.x` 作为节点特征。
 
 ## 4. PLM 特征
 
-PLM 特征优先级如下：
+程序读取 `plm` 特征的优先级如下：
 
 1. `data/manual_features/{dataset}_plm.pt`
 2. `data/manual_features/{dataset}_plm.npy`
@@ -53,13 +40,9 @@ PLM 特征优先级如下：
 4. `data/texts/{dataset}.csv`
 5. `data/texts/{dataset}.txt`
 
-如果提供的是原始文本，程序会用 `--plm-model` 指定的 Hugging Face 模型编码，并缓存到：
+如果放的是原始文本，程序会自动编码并缓存到 `data/feature_cache/`。
 
-```text
-data/feature_cache/
-```
-
-### 文本文件格式
+### 文本格式
 
 `jsonl`：
 
@@ -76,7 +59,51 @@ first node text
 second node text
 ```
 
-要求文本条数和节点数完全一致，按节点编号顺序对齐。
+要求文本条数和节点数完全一致，并且顺序与节点编号一致。
+
+### 离线生成 PLM 特征
+
+先准备文本文件。你可以手工放入，也可以直接自动生成：
+
+```bash
+python prepare_texts.py --datasets ogbn-arxiv cora pubmed amazon-photo --top-k 128
+```
+
+这条命令会：
+
+- `ogbn-arxiv`：优先尝试读取原始 `title + abstract`
+- 其他数据集：从节点特征自动构造伪文本
+
+生成后文本位于：
+
+- `data/texts/ogbn-arxiv.jsonl`
+- `data/texts/cora.jsonl`
+- `data/texts/pubmed.jsonl`
+- `data/texts/amazon-photo.jsonl`
+
+然后执行 PLM 特征编码：
+
+```bash
+python generate_plm_features.py --datasets ogbn-arxiv cora pubmed amazon-photo --plm-model sentence-transformers/all-MiniLM-L6-v2 --batch-size 32
+```
+
+生成后的文件会保存到：
+
+```text
+data/manual_features/
+```
+
+例如：
+
+```text
+data/manual_features/ogbn-arxiv_plm.pt
+```
+
+之后再运行主实验：
+
+```bash
+python main.py --datasets ogbn-arxiv cora pubmed amazon-photo --feature-types plm --models mlp gcn sage gat --runs 5 --seed 42
+```
 
 ## 5. 输出结果
 
@@ -89,6 +116,6 @@ second node text
 
 说明：
 
-- `results_raw.csv`：每次运行一行，适合查训练波动
-- `results_long.csv`：按 `feature_type + model + dataset` 汇总后的均值/标准差
-- `results_wide.csv`：宽表格式，最适合直接抄到论文表格
+- `results_raw.csv`：每次运行一行
+- `results_long.csv`：汇总均值和标准差
+- `results_wide.csv`：适合直接整理到论文表格

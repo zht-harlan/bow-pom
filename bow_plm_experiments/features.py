@@ -9,12 +9,12 @@ import torch.nn.functional as F
 from bow_plm_experiments.data import GraphBundle
 
 
-def _feature_cache_path(root: Path, dataset_name: str, plm_model: str) -> Path:
+def feature_cache_path(root: Path, dataset_name: str, plm_model: str) -> Path:
     safe_model_name = plm_model.replace("/", "__").replace(":", "_")
     return root / "feature_cache" / f"{dataset_name}__{safe_model_name}.pt"
 
 
-def _manual_feature_path(root: Path, dataset_name: str) -> Optional[Path]:
+def manual_feature_path(root: Path, dataset_name: str) -> Optional[Path]:
     candidates = [
         root / "manual_features" / f"{dataset_name}_plm.pt",
         root / "manual_features" / f"{dataset_name}_plm.npy",
@@ -25,7 +25,7 @@ def _manual_feature_path(root: Path, dataset_name: str) -> Optional[Path]:
     return None
 
 
-def _manual_text_path(root: Path, dataset_name: str) -> Optional[Path]:
+def manual_text_path(root: Path, dataset_name: str) -> Optional[Path]:
     candidates = [
         root / "texts" / f"{dataset_name}.jsonl",
         root / "texts" / f"{dataset_name}.csv",
@@ -37,7 +37,7 @@ def _manual_text_path(root: Path, dataset_name: str) -> Optional[Path]:
     return None
 
 
-def _read_texts(path: Path) -> List[str]:
+def read_texts(path: Path) -> List[str]:
     if path.suffix == ".jsonl":
         texts: List[str] = []
         with path.open("r", encoding="utf-8") as handle:
@@ -59,7 +59,7 @@ def _read_texts(path: Path) -> List[str]:
     return [line.rstrip("\n") for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def _load_manual_feature(path: Path) -> torch.Tensor:
+def load_manual_feature(path: Path) -> torch.Tensor:
     if path.suffix == ".pt":
         features = torch.load(path, map_location="cpu")
         if not isinstance(features, torch.Tensor):
@@ -77,11 +77,18 @@ def _mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) ->
     return masked_hidden.sum(dim=1) / lengths
 
 
-def _encode_texts(texts: List[str], model_name: str, batch_size: int) -> torch.Tensor:
+def encode_texts(
+    texts: List[str],
+    model_name: str,
+    batch_size: int,
+    device: Optional[str] = None,
+) -> torch.Tensor:
     from transformers import AutoModel, AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
+    resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(resolved_device)
     model.eval()
 
     outputs = []
@@ -95,10 +102,36 @@ def _encode_texts(texts: List[str], model_name: str, batch_size: int) -> torch.T
                 max_length=256,
                 return_tensors="pt",
             )
+            encoded = {key: value.to(resolved_device) for key, value in encoded.items()}
             result = model(**encoded)
             pooled = _mean_pool(result.last_hidden_state, encoded["attention_mask"])
             outputs.append(F.normalize(pooled, p=2, dim=-1).cpu())
     return torch.cat(outputs, dim=0)
+
+
+def build_and_save_plm_features(
+    dataset_name: str,
+    text_path: Path,
+    output_path: Path,
+    model_name: str,
+    batch_size: int,
+    expected_count: Optional[int] = None,
+    device: Optional[str] = None,
+) -> torch.Tensor:
+    texts = read_texts(text_path)
+    if expected_count is not None and len(texts) != expected_count:
+        raise ValueError(
+            f"Text count mismatch for {dataset_name}: expected {expected_count}, got {len(texts)}."
+        )
+    features = encode_texts(
+        texts=texts,
+        model_name=model_name,
+        batch_size=batch_size,
+        device=device,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(features, output_path)
+    return features
 
 
 def get_features(
@@ -117,15 +150,15 @@ def get_features(
     if feature_type != "plm":
         raise ValueError(f"Unsupported feature type: {feature_type}")
 
-    manual_feature_path = _manual_feature_path(root, bundle.name)
-    if manual_feature_path is not None:
-        return _load_manual_feature(manual_feature_path)
+    feature_path = manual_feature_path(root, bundle.name)
+    if feature_path is not None:
+        return load_manual_feature(feature_path)
 
-    cache_path = _feature_cache_path(root, bundle.name, plm_model)
+    cache_path = feature_cache_path(root, bundle.name, plm_model)
     if cache_path.exists() and not force_recompute_plm:
         return torch.load(cache_path, map_location="cpu").float()
 
-    text_path = _manual_text_path(root, bundle.name)
+    text_path = manual_text_path(root, bundle.name)
     if text_path is None:
         raise FileNotFoundError(
             "PLM features require one of the following:\n"
@@ -135,13 +168,13 @@ def get_features(
             f"No PLM source was found for dataset '{bundle.name}'."
         )
 
-    texts = _read_texts(text_path)
+    texts = read_texts(text_path)
     if len(texts) != bundle.data.num_nodes:
         raise ValueError(
             f"Text count mismatch for {bundle.name}: expected {bundle.data.num_nodes}, got {len(texts)}."
         )
 
-    features = _encode_texts(texts, model_name=plm_model, batch_size=batch_size)
+    features = encode_texts(texts, model_name=plm_model, batch_size=batch_size)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(features, cache_path)
     return features
