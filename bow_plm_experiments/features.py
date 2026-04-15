@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from sklearn.feature_extraction.text import CountVectorizer
 
 from bow_plm_experiments.data import GraphBundle
 
@@ -12,6 +14,10 @@ from bow_plm_experiments.data import GraphBundle
 def feature_cache_path(root: Path, dataset_name: str, plm_model: str) -> Path:
     safe_model_name = plm_model.replace("/", "__").replace(":", "_")
     return root / "feature_cache" / f"{dataset_name}__{safe_model_name}.pt"
+
+
+def bow_cache_path(root: Path, dataset_name: str, max_features: int) -> Path:
+    return root / "feature_cache" / f"{dataset_name}__bow_{max_features}.pt"
 
 
 def manual_feature_path(root: Path, dataset_name: str) -> Optional[Path]:
@@ -66,9 +72,14 @@ def load_manual_feature(path: Path) -> torch.Tensor:
             raise TypeError(f"{path} must contain a torch.Tensor.")
         return features.float()
 
-    import numpy as np
-
     return torch.from_numpy(np.load(path)).float()
+
+
+def build_bow_features(texts: List[str], max_features: int) -> torch.Tensor:
+    vectorizer = CountVectorizer(max_features=max_features, stop_words="english")
+    matrix = vectorizer.fit_transform(texts)
+    features = torch.from_numpy(matrix.toarray()).float()
+    return F.normalize(features, p=2, dim=-1)
 
 
 def _mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
@@ -141,8 +152,25 @@ def get_features(
     plm_model: str,
     batch_size: int,
     force_recompute_plm: bool,
+    bow_max_features: int,
 ) -> torch.Tensor:
     if feature_type == "bow":
+        if bundle.text_path is not None and bundle.data.x is None:
+            cache_path = bow_cache_path(root, bundle.name, bow_max_features)
+            if cache_path.exists():
+                return torch.load(cache_path, map_location="cpu").float()
+
+            texts = read_texts(bundle.text_path)
+            if len(texts) != bundle.data.num_nodes:
+                raise ValueError(
+                    f"Text count mismatch for {bundle.name}: expected {bundle.data.num_nodes}, got {len(texts)}."
+                )
+
+            features = build_bow_features(texts, max_features=bow_max_features)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(features, cache_path)
+            return features
+
         if bundle.data.x is None:
             raise ValueError(f"{bundle.name} does not provide default node features for BoW.")
         return bundle.data.x.float()

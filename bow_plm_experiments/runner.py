@@ -73,13 +73,9 @@ def _write_summary_results(path: Path, rows: List[Dict[str, object]]) -> None:
 
 
 def _write_wide_results(path: Path, rows: List[Dict[str, object]]) -> None:
-    dataset_order = ["ogbn-arxiv", "cora", "pubmed", "amazon-photo"]
-    key_order = [
-        (dataset, metric)
-        for dataset in dataset_order
-        for metric in ("acc", "acc_std", "f1_macro", "f1_macro_std")
-    ]
-
+    feature_order = list(dict.fromkeys(str(row["feature_type"]) for row in rows))
+    model_order = list(dict.fromkeys(str(row["model"]) for row in rows))
+    dataset_order = list(dict.fromkeys(str(row["dataset"]) for row in rows))
     grouped: Dict[tuple, Dict[str, object]] = {}
     for row in rows:
         group_key = (row["feature_type"], row["model"])
@@ -93,13 +89,20 @@ def _write_wide_results(path: Path, rows: List[Dict[str, object]]) -> None:
         grouped[group_key][f"{row['dataset']}_f1_macro"] = row["f1_macro"]
         grouped[group_key][f"{row['dataset']}_f1_macro_std"] = row["f1_macro_std"]
 
-    headers = ["feature_type", "model"] + [f"{dataset}_{metric}" for dataset, metric in key_order]
+    headers = ["feature_type", "model"] + [
+        f"{dataset}_{metric}"
+        for dataset in dataset_order
+        for metric in ("acc", "acc_std", "f1_macro", "f1_macro_std")
+    ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=headers)
         writer.writeheader()
-        for feature_type in ["bow", "plm"]:
-            for model_name in ["mlp", "gcn", "sage", "gat"]:
-                row = grouped.get((feature_type, model_name), {"feature_type": feature_type, "model": model_name})
+        for feature_type in feature_order:
+            for model_name in model_order:
+                row = grouped.get(
+                    (feature_type, model_name),
+                    {"feature_type": feature_type, "model": model_name},
+                )
                 writer.writerow(row)
 
 
@@ -118,6 +121,7 @@ def run_experiments(
     num_layers: int,
     heads: int,
     batch_size: int,
+    bow_max_features: int,
     seed: int,
     runs: int,
     plm_model: str,
@@ -160,6 +164,7 @@ def run_experiments(
                     plm_model=plm_model,
                     batch_size=batch_size,
                     force_recompute_plm=force_recompute_plm,
+                    bow_max_features=bow_max_features,
                 )
 
                 for model_name in model_names:
@@ -215,6 +220,7 @@ def run_experiments(
             handle.write(f"{key}={value}\n")
         handle.write(f"runs={runs}\n")
         handle.write(f"plm_model={plm_model}\n")
+        handle.write(f"bow_max_features={bow_max_features}\n")
         handle.write(f"datasets={','.join(datasets)}\n")
         handle.write(f"feature_types={','.join(feature_types)}\n")
         handle.write(f"models={','.join(model_names)}\n")

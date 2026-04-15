@@ -11,7 +11,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--datasets",
         nargs="+",
-        default=["ogbn-arxiv", "cora", "pubmed", "amazon-photo"],
+        default=["ogbn-arxiv", "pubmed", "children", "history", "photo"],
         help="Datasets to evaluate.",
     )
     parser.add_argument(
@@ -24,25 +24,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["mlp", "gcn", "sage", "gat"],
-        choices=["mlp", "gcn", "sage", "gat"],
+        default=["mlp", "gcn", "sage", "gat", "sgc", "jknet", "appnp"],
+        choices=["mlp", "gcn", "sage", "gat", "sgc", "jknet", "appnp"],
         help="Models to evaluate.",
     )
-    parser.add_argument("--root", default="data", help="Dataset/cache root directory.")
+    parser.add_argument("--root", default="数据集", help="Dataset/cache root directory.")
     parser.add_argument(
         "--output-dir",
         default="outputs",
         help="Directory to save CSV summaries.",
     )
-    parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--dropout", type=float, default=0.5)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--weight-decay", type=float, default=5e-4)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--patience", type=int, default=30)
-    parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument("--num-layers", type=int, default=1)
     parser.add_argument("--heads", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument(
+        "--bow-max-features",
+        type=int,
+        default=2048,
+        help="Fallback BoW vocabulary size when a dataset does not already provide data.x.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--runs",
@@ -80,6 +86,7 @@ def main() -> None:
         num_layers=args.num_layers,
         heads=args.heads,
         batch_size=args.batch_size,
+        bow_max_features=args.bow_max_features,
         seed=args.seed,
         runs=args.runs,
         plm_model=args.plm_model,
